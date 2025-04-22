@@ -1,83 +1,80 @@
 package main
 
 import (
-	"github.com/Frozz164/forum-app_v2/forum-service/pkg/middleware"
+	"fmt"
 	"log"
 	"time"
 
-	"github.com/Frozz164/forum-app_v2/forum-service/config"
-	"github.com/Frozz164/forum-app_v2/forum-service/internal/migrations"
-	"github.com/Frozz164/forum-app_v2/forum-service/internal/repository"
-	"github.com/Frozz164/forum-app_v2/forum-service/internal/service"
-	"github.com/Frozz164/forum-app_v2/forum-service/pkg/websocket"
+	"github.com/Frozz164/forum-app_v2/auth-service/config"
+	"github.com/Frozz164/forum-app_v2/auth-service/handlers"
+	"github.com/Frozz164/forum-app_v2/auth-service/internal/migrations"
+	"github.com/Frozz164/forum-app_v2/auth-service/internal/repository"
+	"github.com/Frozz164/forum-app_v2/auth-service/internal/service"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
 
 func main() {
+	// Загрузка конфигурации
 	cfg := config.Load()
 
-	// Initialize database connection
+	// Инициализация подключения к базе данных
 	db, err := cfg.Database.Connect()
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database connection: %v", err)
+		}
+	}()
 
-	// Migrate the database
+	// Применение миграций
 	err = migrations.MigrateDB(db)
 	if err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
+	log.Println("Database migrations applied successfully")
 
-	// Initialize repositories
-	postRepo := repository.NewPostRepository(db)
-	chatRepo := repository.NewChatRepository(db)
+	// Инициализация слоев приложения
+	authRepo := repository.NewAuthRepositoryImpl(db)
+	authService := service.NewAuthServiceImpl(authRepo, cfg)
+	authHandler := handlers.NewAuthServiceHandler(cfg, authService)
 
-	// Initialize services
-	postService := service.NewPostService(postRepo)
-	chatService := service.NewChatService(chatRepo)
-
-	// Initialize WebSocket pool
-	pool := websocket.NewPool()
-	go pool.Start()
-
-	// Initialize handlers
-	postHandler := handler.NewPostHandler(postService)
-	chatHandler := handler.NewChatHandler(chatService, pool)
-
-	// Gin setup
+	// Настройка роутера Gin
 	router := gin.Default()
 
-	// CORS configuration
+	// Настройка CORS
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowOrigins:     []string{"http://localhost:3000"}, // Разрешенные origins
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// Public routes
-	router.GET("/api/posts", postHandler.GetAllPosts)
-	router.GET("/api/posts/:id", postHandler.GetPost)
-	router.GET("/ws", chatHandler.WebsocketHandler)
-
-	// Authenticated routes
-	authGroup := router.Group("/api")
-	authGroup.Use(middleware.AuthMiddleware(cfg.JWT.SecretKey))
+	// Маршруты API
+	api := router.Group("/api/v1")
 	{
-		authGroup.POST("/posts", postHandler.CreatePost)
-		authGroup.DELETE("/posts/:id", postHandler.DeletePost)
+		api.POST("/register", authHandler.Register)
+		api.POST("/login", authHandler.Login)
+		api.GET("/validate", authHandler.Validate)
 	}
 
-	// Start server
+	// Обслуживание статических файлов (если нужно)
+	router.Static("/web", "../web")
+
+	// Запуск сервера
 	port := cfg.Port
 	if port == "" {
-		port = "8081" // Different port from auth service
+		port = "8080" // Порт по умолчанию
 	}
-	log.Printf("Forum service listening on :%s", port)
-	router.Run(":" + port)
+	addr := fmt.Sprintf(":%s", port)
+
+	log.Printf("Starting auth service on %s", addr)
+	if err := router.Run(addr); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }

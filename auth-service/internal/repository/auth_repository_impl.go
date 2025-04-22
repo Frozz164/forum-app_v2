@@ -14,8 +14,18 @@ type AuthRepositoryImpl struct {
 	db *sql.DB
 }
 
+func (r *AuthRepositoryImpl) LoginByEmail(ctx context.Context, email, password string) (string, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (r *AuthRepositoryImpl) GetByEmail(ctx context.Context, email string) (interface{}, interface{}) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // NewAuthRepositoryImpl ...
-func NewAuthRepositoryImpl(db *sql.DB) AuthRepository {
+func NewAuthRepositoryImpl(db *sql.DB) *AuthRepositoryImpl {
 	return &AuthRepositoryImpl{db: db}
 }
 

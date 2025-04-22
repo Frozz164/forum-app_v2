@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/Frozz164/forum-app_v2/forum-service/internal/domain"
@@ -16,6 +15,7 @@ type PostRepository interface {
 	GetAll(ctx context.Context) ([]*domain.Post, error)
 	Delete(ctx context.Context, id, authorID int64) error
 	GetPostsWithAuthors(ctx context.Context) ([]*domain.Post, error)
+	GetPostsPaginated(ctx context.Context, offset, limit int) ([]*domain.Post, error)
 }
 
 type PostRepositoryImpl struct {
@@ -42,7 +42,6 @@ func (r *PostRepositoryImpl) Create(ctx context.Context, post *domain.Post) (int
 	).Scan(&id)
 
 	if err != nil {
-		log.Printf("Error creating post: %v", err)
 		return 0, fmt.Errorf("failed to create post: %w", err)
 	}
 
@@ -57,22 +56,24 @@ func (r *PostRepositoryImpl) GetByID(ctx context.Context, id int64) (*domain.Pos
 	`
 
 	var post domain.Post
+	var createdAt time.Time
+
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&post.ID,
 		&post.Title,
 		&post.Content,
 		&post.AuthorID,
-		&post.CreatedAt,
+		&createdAt,
 	)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		log.Printf("Error getting post by ID: %v", err)
 		return nil, fmt.Errorf("failed to get post: %w", err)
 	}
 
+	post.CreatedAt = createdAt.Format(time.RFC3339)
 	return &post, nil
 }
 
@@ -83,29 +84,59 @@ func (r *PostRepositoryImpl) GetAll(ctx context.Context) ([]*domain.Post, error)
 		ORDER BY created_at DESC
 	`
 
+	return r.queryPosts(ctx, query)
+}
+
+func (r *PostRepositoryImpl) GetPostsWithAuthors(ctx context.Context) ([]*domain.Post, error) {
+	query := `
+		SELECT p.id, p.title, p.content, p.author_id, p.created_at, u.username as author
+		FROM posts p
+		JOIN users u ON p.author_id = u.id
+		ORDER BY p.created_at DESC
+	`
+
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get posts: %w", err)
+		return nil, fmt.Errorf("failed to query posts: %w", err)
 	}
 	defer rows.Close()
 
 	var posts []*domain.Post
 	for rows.Next() {
 		var post domain.Post
-		err := rows.Scan(
+		var createdAt time.Time
+
+		if err := rows.Scan(
 			&post.ID,
 			&post.Title,
 			&post.Content,
 			&post.AuthorID,
-			&post.CreatedAt,
-		)
-		if err != nil {
+			&createdAt,
+			&post.Author,
+		); err != nil {
 			return nil, fmt.Errorf("failed to scan post: %w", err)
 		}
+
+		post.CreatedAt = createdAt.Format(time.RFC3339)
 		posts = append(posts, &post)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
 	return posts, nil
+}
+
+func (r *PostRepositoryImpl) GetPostsPaginated(ctx context.Context, offset, limit int) ([]*domain.Post, error) {
+	query := `
+		SELECT id, title, content, author_id, created_at
+		FROM posts
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	return r.queryPosts(ctx, query, limit, offset)
 }
 
 func (r *PostRepositoryImpl) Delete(ctx context.Context, id, authorID int64) error {
@@ -116,7 +147,6 @@ func (r *PostRepositoryImpl) Delete(ctx context.Context, id, authorID int64) err
 
 	result, err := r.db.ExecContext(ctx, query, id, authorID)
 	if err != nil {
-		log.Printf("Error deleting post: %v", err)
 		return fmt.Errorf("failed to delete post: %w", err)
 	}
 
@@ -126,41 +156,40 @@ func (r *PostRepositoryImpl) Delete(ctx context.Context, id, authorID int64) err
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("post not found or you're not the author")
+		return fmt.Errorf("post not found or not authorized")
 	}
 
 	return nil
-
 }
-func (r *PostRepositoryImpl) GetPostsWithAuthors(ctx context.Context) ([]*domain.Post, error) {
-	query := `
-        SELECT p.id, p.title, p.content, p.author_id, p.created_at, u.username
-        FROM posts p
-        JOIN users u ON p.author_id = u.id
-        ORDER BY p.created_at DESC
-    `
 
-	rows, err := r.db.QueryContext(ctx, query)
+func (r *PostRepositoryImpl) queryPosts(ctx context.Context, query string, args ...interface{}) ([]*domain.Post, error) {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get posts: %w", err)
+		return nil, fmt.Errorf("failed to query posts: %w", err)
 	}
 	defer rows.Close()
 
 	var posts []*domain.Post
 	for rows.Next() {
 		var post domain.Post
-		err := rows.Scan(
+		var createdAt time.Time
+
+		if err := rows.Scan(
 			&post.ID,
 			&post.Title,
 			&post.Content,
 			&post.AuthorID,
-			&post.CreatedAt,
-			&post.Author,
-		)
-		if err != nil {
+			&createdAt,
+		); err != nil {
 			return nil, fmt.Errorf("failed to scan post: %w", err)
 		}
+
+		post.CreatedAt = createdAt.Format(time.RFC3339)
 		posts = append(posts, &post)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
 	}
 
 	return posts, nil

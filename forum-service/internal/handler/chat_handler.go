@@ -1,23 +1,23 @@
 package handler
 
 import (
-	"context"
+	_ "context"
 	"log"
-	"math/rand"
-	_ "net/http"
-	_ "strconv"
+	"net/http"
 	"time"
 
 	"github.com/Frozz164/forum-app_v2/auth-service/pkg/helper"
 	"github.com/Frozz164/forum-app_v2/forum-service/internal/service"
 	"github.com/Frozz164/forum-app_v2/forum-service/pkg/websocket"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 )
 
 type ChatHandler struct {
 	chatService service.ChatService
 	pool        *websocket.Pool
 	jwtSecret   string
+	rateLimiter *rate.Limiter
 }
 
 func NewChatHandler(chatService service.ChatService, pool *websocket.Pool, jwtSecret string) *ChatHandler {
@@ -25,10 +25,16 @@ func NewChatHandler(chatService service.ChatService, pool *websocket.Pool, jwtSe
 		chatService: chatService,
 		pool:        pool,
 		jwtSecret:   jwtSecret,
+		rateLimiter: rate.NewLimiter(rate.Every(time.Second), 1), // 1 запрос в секунду
 	}
 }
 
 func (h *ChatHandler) WebsocketHandler(c *gin.Context) {
+	if !h.rateLimiter.Allow() {
+		c.AbortWithStatus(http.StatusTooManyRequests)
+		return
+	}
+
 	conn, err := websocket.Upgrade(c.Writer, c.Request)
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)
@@ -63,26 +69,15 @@ func (h *ChatHandler) WebsocketHandler(c *gin.Context) {
 
 	h.pool.Register <- client
 
-	if messages, err := h.chatService.GetHistory(context.Background(), 50); err == nil {
-		for _, msg := range messages {
-			client.Send <- websocket.Message{
-				Type:    websocket.MsgTypeChat,
-				Content: msg.Content,
-				Sender:  msg.Username,
-			}
-		}
-	}
-
 	go client.Read(h.chatService)
 	go client.Write()
 }
 
 func generateRandomID() string {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 6)
 	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))]
+		b[i] = chars[time.Now().UnixNano()%int64(len(chars))]
 	}
 	return string(b)
 }

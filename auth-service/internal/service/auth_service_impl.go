@@ -8,6 +8,7 @@ import (
 	"github.com/Frozz164/forum-app_v2/auth-service/internal/repository"
 	"github.com/Frozz164/forum-app_v2/auth-service/pkg/helper"
 	"log"
+	"strconv"
 )
 
 // AuthServiceImpl ...
@@ -16,8 +17,13 @@ type AuthServiceImpl struct {
 	cfg            *config.Config
 }
 
+func (s *AuthServiceImpl) LoginByEmail(ctx context.Context, email string, password string) (string, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 // NewAuthServiceImpl ...
-func NewAuthServiceImpl(authRepository repository.AuthRepository, cfg *config.Config) AuthService {
+func NewAuthServiceImpl(authRepository *repository.AuthRepositoryImpl, cfg *config.Config) AuthService {
 	return &AuthServiceImpl{authRepository: authRepository, cfg: cfg}
 }
 
@@ -62,7 +68,7 @@ func (s *AuthServiceImpl) Login(ctx context.Context, username, password string) 
 		return "", fmt.Errorf("invalid credentials")
 	}
 
-	token, err := helper.GenerateJWT(user.ID, s.cfg.JWT.SecretKey, s.cfg.JWT.ExpiresIn)
+	token, err := helper.GenerateJWT(user.ID, s.cfg.JWT.SecretKey, strconv.Itoa(s.cfg.JWT.ExpiresIn))
 	if err != nil {
 		log.Printf("Error generating JWT: %v", err)
 		return "", fmt.Errorf("failed to generate JWT: %w", err)

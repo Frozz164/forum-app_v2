@@ -59,19 +59,30 @@ func ValidateToken(tokenString, secretKey string) (int64, error) {
 }
 
 // GenerateJWT ...
-func GenerateJWT(userID int64, secretKey string, expiresIn int) (string, error) {
-	expirationTime := time.Now().Add(time.Duration(expiresIn) * time.Second)
+func GenerateJWT(userID int64, secretKey string, expiresIn string) (string, error) {
+	if secretKey == "" {
+		return "", errors.New("secret key cannot be empty")
+	}
+
+	expiresInSeconds, err := strconv.ParseInt(expiresIn, 10, 64)
+	if err != nil {
+		return "", fmt.Errorf("invalid expiresIn: %w", err)
+	}
+	if expiresInSeconds <= 0 {
+		return "", errors.New("expiresIn must be positive")
+	}
+
+	expirationTime := time.Now().Add(time.Duration(expiresInSeconds) * time.Second)
+
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"exp":     expirationTime.Unix(),
+		"iss":     "forum-app",
+		"iat":     time.Now().Unix(),
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(secretKey))
-	if err != nil {
-		log.Printf("Error signing token: %v", err)
-		return "", err
-	}
-	return tokenString, nil
+	return token.SignedString([]byte(secretKey))
 }
 
 // GetEnv ...

@@ -7,61 +7,75 @@ document.addEventListener('DOMContentLoaded', () => {
     const registerLink = document.getElementById('register-link');
     const loginLink = document.getElementById('login-link');
 
-    // Toggle between forms
-    const showRegisterForm = () => {
-        registerFormContainer.style.display = 'block';
-        loginFormContainer.style.display = 'none';
-        clearMessage();
+    // Токен CSRF
+    let csrfToken = '';
+
+    // Получение CSRF токена
+    const getCsrfToken = async () => {
+        try {
+            const response = await fetch('/api/v1/csrf-token', {
+                credentials: 'include'
+            });
+            const data = await response.json();
+            csrfToken = data.token;
+        } catch (error) {
+            console.error('Failed to get CSRF token:', error);
+        }
     };
 
-    const showLoginForm = () => {
-        registerFormContainer.style.display = 'none';
-        loginFormContainer.style.display = 'block';
-        clearMessage();
-    };
-
-    const clearMessage = () => {
-        messageDiv.textContent = '';
-        messageDiv.className = '';
-    };
+    // Инициализация
+    getCsrfToken();
 
     const showMessage = (text, isSuccess) => {
         messageDiv.textContent = text;
         messageDiv.className = isSuccess ? 'success' : 'error';
+        messageDiv.style.display = 'block';
+
+        if (isSuccess) {
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 3000);
+        }
     };
 
-    // Form toggle handlers
+    const clearForms = () => {
+        registerForm.reset();
+        loginForm.reset();
+    };
+
+    // Переключение форм
     registerLink.addEventListener('click', (e) => {
         e.preventDefault();
-        showRegisterForm();
+        registerFormContainer.style.display = 'block';
+        loginFormContainer.style.display = 'none';
+        clearForms();
     });
 
     loginLink.addEventListener('click', (e) => {
         e.preventDefault();
-        showLoginForm();
+        registerFormContainer.style.display = 'none';
+        loginFormContainer.style.display = 'block';
+        clearForms();
     });
 
-    // Registration handler
+    // Обработка регистрации
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        const username = document.getElementById('username').value;
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
-        const confirmPassword = document.getElementById('confirmPassword').value;
+        const formData = {
+            username: document.getElementById('username').value.trim(),
+            email: document.getElementById('email').value.trim(),
+            password: document.getElementById('password').value,
+            confirmPassword: document.getElementById('confirmPassword').value
+        };
 
-        // Validation
-        if (username.length < 3) {
-            showMessage("Username must be at least 3 characters", false);
-            return;
-        }
-
-        if (password !== confirmPassword) {
+        // Валидация
+        if (formData.password !== formData.confirmPassword) {
             showMessage("Passwords don't match", false);
             return;
         }
 
-        if (password.length < 8) {
+        if (formData.password.length < 8) {
             showMessage("Password must be at least 8 characters", false);
             return;
         }
@@ -70,18 +84,26 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/v1/register', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
                 },
-                body: JSON.stringify({ username, email, password })
+                credentials: 'include',
+                body: JSON.stringify({
+                    username: formData.username,
+                    email: formData.email,
+                    password: formData.password
+                })
             });
 
-            const result = await response.json();
+            const data = await response.json();
 
             if (response.ok) {
                 showMessage("Registration successful! Redirecting...", true);
-                setTimeout(() => window.location.href = '/login.html', 1500);
+                localStorage.setItem('token', data.access_token);
+                localStorage.setItem('username', data.username);
+                setTimeout(() => window.location.href = '/', 1500);
             } else {
-                showMessage(result.message || "Registration failed", false);
+                showMessage(data.error || "Registration failed", false);
             }
         } catch (error) {
             showMessage("Network error. Please try again.", false);
@@ -89,35 +111,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Login handler
+    // Обработка входа
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        const usernameOrEmail = document.getElementById('loginUsername').value;
-        const password = document.getElementById('loginPassword').value;
+        const formData = {
+            username: document.getElementById('loginUsername').value.trim(),
+            password: document.getElementById('loginPassword').value
+        };
 
         try {
             const response = await fetch('/api/v1/login', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
                 },
-                body: JSON.stringify({
-                    username: usernameOrEmail.includes('@') ? undefined : usernameOrEmail,
-                    email: usernameOrEmail.includes('@') ? usernameOrEmail : undefined,
-                    password
-                })
+                credentials: 'include',
+                body: JSON.stringify(formData)
             });
 
-            const result = await response.json();
+            const data = await response.json();
 
             if (response.ok) {
                 showMessage("Login successful! Redirecting...", true);
-                localStorage.setItem('token', result.token);
-                localStorage.setItem('username', result.username);
-                setTimeout(() => window.location.href = '/profile.html', 1500);
+                localStorage.setItem('token', data.access_token);
+                localStorage.setItem('username', data.username);
+                setTimeout(() => window.location.href = '/', 1500);
             } else {
-                showMessage(result.message || "Login failed", false);
+                showMessage(data.error || "Login failed", false);
             }
         } catch (error) {
             showMessage("Network error. Please try again.", false);

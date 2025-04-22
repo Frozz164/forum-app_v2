@@ -1,66 +1,82 @@
-package cmd
+package main
 
 import (
-	"github.com/Frozz164/forum-app_v2/forum-service/internal/domain"
+	_ "database/sql"
+	_ "fmt"
+	"log"
+	"time"
+
+	"github.com/Frozz164/forum-app_v2/forum-service/config"
 	"github.com/Frozz164/forum-app_v2/forum-service/internal/handler"
+	"github.com/Frozz164/forum-app_v2/forum-service/internal/migrations"
 	"github.com/Frozz164/forum-app_v2/forum-service/internal/repository"
 	"github.com/Frozz164/forum-app_v2/forum-service/internal/service"
 	"github.com/Frozz164/forum-app_v2/forum-service/pkg/middleware"
 	"github.com/Frozz164/forum-app_v2/forum-service/pkg/websocket"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-	"net/http"
+	_ "github.com/lib/pq"
 )
 
 func main() {
+	cfg := config.Load()
 
-	// Инициализация БД
-	db, err := gorm.Open(sqlite.Open("forum.db"), &gorm.Config{})
+	// Database connection
+	db, err := cfg.Database.Connect()
 	if err != nil {
-		panic("failed to connect database")
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	// Run migrations
+	err = migrations.MigrateDB(db)
+	if err != nil {
+		log.Fatalf("Failed to migrate database: %v", err)
 	}
 
-	// Автомиграция
-	db.AutoMigrate(&domain.Post{}, &domain.Message{})
-
-	// Инициализация слоев
+	// Initialize layers
 	postRepo := repository.NewPostRepository(db)
+	chatRepo := repository.NewChatRepository(db)
+
 	postService := service.NewPostService(postRepo)
+	chatService := service.NewChatService(chatRepo)
+
+	pool := websocket.NewPool()
+	go pool.Start()
+
 	postHandler := handler.NewPostHandler(postService)
+	chatHandler := handler.NewChatHandler(chatService, pool, cfg.JWT.SecretKey)
 
-	chatPool := websocket.NewPool()
-	go chatPool.Start()
+	// Gin setup
+	router := gin.Default()
 
-	// Настройка роутера
-	r := gin.Default()
+	// CORS configuration
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		AllowWebSockets:  true,
+		MaxAge:           12 * time.Hour,
+	}))
 
-	// Статические файлы
-	r.Static("/static", "./web/static")
-	r.LoadHTMLGlob("web/templates/*")
+	// Public routes
+	router.GET("/api/posts", postHandler.GetAllPosts)
+	router.GET("/api/posts/:id", postHandler.GetPost)
+	router.GET("/ws", chatHandler.WebsocketHandler)
 
-	// API для постов
-	api := r.Group("/api")
+	// Authenticated routes
+	authGroup := router.Group("/api")
+	authGroup.Use(middleware.AuthMiddleware(cfg.JWT.SecretKey))
 	{
-		api.Use(middleware.AuthMiddleware())
-		api.POST("/posts", postHandler.CreatePost)
-		api.GET("/posts", postHandler.GetAllPosts)
-		api.DELETE("/posts/:id", postHandler.DeletePost)
+		authGroup.POST("/posts", postHandler.CreatePost)
+		authGroup.DELETE("/posts/:id", postHandler.DeletePost)
 	}
 
-	// WebSocket endpoint
-	r.GET("/ws", func(c *gin.Context) {
-		handler.WebsocketHandler(c, chatPool)
-	})
-
-	// HTML страницы
-	r.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index.html", nil)
-	})
-
-	r.GET("/chat", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "chat.html", nil)
-	})
-
-	r.Run(":8080")
+	// Start server
+	log.Printf("Server starting on :%s", cfg.Port)
+	if err := router.Run(":" + cfg.Port); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }
