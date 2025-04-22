@@ -14,6 +14,7 @@ import (
 )
 
 func main() {
+
 	// Инициализация БД
 	db, err := gorm.Open(sqlite.Open("forum.db"), &gorm.Config{})
 	if err != nil {

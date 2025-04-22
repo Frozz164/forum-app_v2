@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -89,4 +90,41 @@ func StringToInt(str string) (int, error) {
 		return 0, fmt.Errorf("cannot convert string to integer: %w", err)
 	}
 	return num, nil
+}
+
+var ErrInvalidToken = errors.New("invalid token")
+
+type CustomClaims struct {
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username"`
+	jwt.RegisteredClaims
+}
+
+func ValidateTokenWithClaims(tokenString, secretKey string) (*CustomClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secretKey), nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(*CustomClaims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, ErrInvalidToken
+}
+
+func GenerateJWTWithClaims(userID int64, username, secretKey string, expiresIn int) (string, error) {
+	claims := CustomClaims{
+		UserID:   userID,
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expiresIn) * time.Second)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secretKey))
 }

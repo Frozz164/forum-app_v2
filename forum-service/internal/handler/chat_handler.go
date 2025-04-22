@@ -4,8 +4,8 @@ import (
 	"context"
 	"log"
 	"math/rand"
-	"net/http"
-	"strconv"
+	_ "net/http"
+	_ "strconv"
 	"time"
 
 	"github.com/Frozz164/forum-app_v2/auth-service/pkg/helper"
@@ -45,8 +45,6 @@ func (h *ChatHandler) WebsocketHandler(c *gin.Context) {
 			readOnly = false
 			username = claims.Username
 			userID = claims.UserID
-		} else {
-			log.Printf("Token validation error: %v", err)
 		}
 	}
 
@@ -65,7 +63,6 @@ func (h *ChatHandler) WebsocketHandler(c *gin.Context) {
 
 	h.pool.Register <- client
 
-	// Send message history
 	if messages, err := h.chatService.GetHistory(context.Background(), 50); err == nil {
 		for _, msg := range messages {
 			client.Send <- websocket.Message{
@@ -78,21 +75,6 @@ func (h *ChatHandler) WebsocketHandler(c *gin.Context) {
 
 	go client.Read(h.chatService)
 	go client.Write()
-}
-
-func (h *ChatHandler) GetChatHistory(c *gin.Context) {
-	limit := 50
-	if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 {
-		limit = l
-	}
-
-	messages, err := h.chatService.GetHistory(c.Request.Context(), limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, messages)
 }
 
 func generateRandomID() string {
