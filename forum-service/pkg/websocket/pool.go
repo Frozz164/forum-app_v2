@@ -2,13 +2,12 @@ package websocket
 
 import (
 	"context"
+	"github.com/Frozz164/forum-app_v2/forum-service/internal/domain"
+	"github.com/Frozz164/forum-app_v2/forum-service/internal/service"
 	"log"
 	"net/http"
 	"sync"
 	"time"
-
-	_ "github.com/Frozz164/forum-app_v2/forum-service/internal/repository"
-	"github.com/Frozz164/forum-app_v2/forum-service/internal/service"
 
 	"github.com/gorilla/websocket"
 )
@@ -19,6 +18,8 @@ const (
 	PingInterval  = 30 * time.Second
 	WriteTimeout  = 10 * time.Second
 	ReadTimeout   = PingInterval * 2
+	MaxMsgSize    = 1024 // 1KB
+	BufferSize    = 256  // Размер буфера сообщений
 )
 
 var upgrader = websocket.Upgrader{
@@ -58,17 +59,23 @@ type Pool struct {
 	MaxMsgSize    int64
 	RateLimit     time.Duration
 	lastBroadcast time.Time
+	ChatService   ChatService // Интерфейс для работы с историей сообщений
 }
 
-func NewPool() *Pool {
+func NewPool(chatService ChatService) *Pool {
 	return &Pool{
-		Register:   make(chan *Client),
-		Unregister: make(chan *Client),
-		Broadcast:  make(chan Message, 100),
-		Clients:    make(map[*Client]bool),
-		MaxMsgSize: 1024, // 1KB
-		RateLimit:  100 * time.Millisecond,
+		Register:    make(chan *Client),
+		Unregister:  make(chan *Client),
+		Broadcast:   make(chan Message, BufferSize),
+		Clients:     make(map[*Client]bool),
+		MaxMsgSize:  MaxMsgSize,
+		RateLimit:   100 * time.Millisecond,
+		ChatService: chatService,
 	}
+}
+
+type ChatService interface {
+	GetRecentMessages(ctx context.Context, limit int) ([]*domain.Message, error)
 }
 
 func (pool *Pool) Start() {
@@ -97,32 +104,34 @@ func (pool *Pool) handleNewClient(client *Client) {
 	pool.Clients[client] = true
 	pool.clientMutex.Unlock()
 
+	// Отправляем историю сообщений новому клиенту
 	go func(c *Client) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		messages, err := service.GetRecentMessages(ctx, 50)
+		domainMessages, err := pool.ChatService.GetRecentMessages(ctx, 50)
 		if err != nil {
 			log.Printf("Failed to get message history: %v", err)
 			return
 		}
 
-		c.mu.Lock()
-		defer c.mu.Unlock()
-
-		for _, msg := range messages {
-			select {
-			case c.Send <- Message{
+		for _, dm := range domainMessages {
+			// Преобразуем domain.Message в websocket.Message
+			createdAt, _ := time.Parse(time.RFC3339, dm.CreatedAt)
+			wsMsg := Message{
 				Type:      MsgTypeChat,
-				Content:   msg.Content,
-				Sender:    msg.Username,
-				Timestamp: msg.CreatedAt.Unix(),
-				UserID:    msg.UserID,
-			}:
+				Content:   dm.Content,
+				Sender:    dm.Username,
+				Timestamp: createdAt.Unix(),
+				UserID:    dm.UserID,
+			}
+
+			select {
+			case c.Send <- wsMsg: // Теперь типы совпадают
 			case <-c.done:
 				return
 			default:
-				log.Printf("Client %s send buffer full", c.Username)
+				log.Printf("Client %s send buffer full, skipping history", c.Username)
 				return
 			}
 		}
@@ -148,9 +157,13 @@ func (pool *Pool) broadcastMessage(message Message) {
 	pool.lastBroadcast = now
 
 	pool.clientMutex.RLock()
-	defer pool.clientMutex.RUnlock()
-
+	clients := make([]*Client, 0, len(pool.Clients))
 	for client := range pool.Clients {
+		clients = append(clients, client)
+	}
+	pool.clientMutex.RUnlock()
+
+	for _, client := range clients {
 		select {
 		case client.Send <- message:
 		case <-client.done:
@@ -162,9 +175,13 @@ func (pool *Pool) broadcastMessage(message Message) {
 
 func (pool *Pool) sendPingToAll() {
 	pool.clientMutex.RLock()
-	defer pool.clientMutex.RUnlock()
-
+	clients := make([]*Client, 0, len(pool.Clients))
 	for client := range pool.Clients {
+		clients = append(clients, client)
+	}
+	pool.clientMutex.RUnlock()
+
+	for _, client := range clients {
 		client.mu.Lock()
 		client.Conn.SetWriteDeadline(time.Now().Add(WriteTimeout))
 		err := client.Conn.WriteMessage(websocket.PingMessage, nil)
@@ -176,7 +193,7 @@ func (pool *Pool) sendPingToAll() {
 	}
 }
 
-func (c *Client) Read(chatService service.ChatService) {
+func (c *Client) Read(service.ChatService) {
 	defer func() {
 		c.Pool.Unregister <- c
 		c.Conn.Close()
@@ -236,6 +253,7 @@ func (c *Client) Write() {
 			err := c.Conn.WriteJSON(message)
 			c.mu.Unlock()
 			if err != nil {
+				c.Pool.Unregister <- c
 				return
 			}
 
@@ -245,6 +263,7 @@ func (c *Client) Write() {
 			err := c.Conn.WriteMessage(websocket.PingMessage, nil)
 			c.mu.Unlock()
 			if err != nil {
+				c.Pool.Unregister <- c
 				return
 			}
 
@@ -260,4 +279,16 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 		return nil, err
 	}
 	return conn, nil
+}
+
+func NewClient(conn *websocket.Conn, pool *Pool, username string, userID int64, readOnly bool) *Client {
+	return &Client{
+		Conn:     conn,
+		Pool:     pool,
+		Username: username,
+		UserID:   userID,
+		ReadOnly: readOnly,
+		Send:     make(chan Message, BufferSize),
+		done:     make(chan struct{}),
+	}
 }

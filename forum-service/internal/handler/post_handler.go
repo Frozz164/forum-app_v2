@@ -13,7 +13,7 @@ type PostHandler struct {
 	service service.PostService
 }
 
-func NewPostHandler(service *service.PostServiceImpl) *PostHandler {
+func NewPostHandler(service service.PostService) *PostHandler {
 	return &PostHandler{service: service}
 }
 

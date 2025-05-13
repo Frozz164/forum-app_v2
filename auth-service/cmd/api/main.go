@@ -47,7 +47,7 @@ func main() {
 
 	// Настройка CORS
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"}, // Разрешенные origins
+		AllowOrigins:     []string{"http://localhost:8081"},
 		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -64,7 +64,8 @@ func main() {
 	}
 
 	// Обслуживание статических файлов (если нужно)
-	router.Static("/web", "../web")
+	router.Static("/static", "../web")          // CSS/JS/Images
+	router.StaticFile("/", "../web/index.html") // Главная страница
 
 	// Запуск сервера
 	port := cfg.Port
@@ -77,4 +78,7 @@ func main() {
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+	api.OPTIONS("/register", func(c *gin.Context) {
+		c.Status(200)
+	})
 }

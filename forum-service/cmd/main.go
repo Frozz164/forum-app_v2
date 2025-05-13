@@ -1,11 +1,6 @@
 package main
 
 import (
-	_ "database/sql"
-	_ "fmt"
-	"log"
-	"time"
-
 	"github.com/Frozz164/forum-app_v2/forum-service/config"
 	"github.com/Frozz164/forum-app_v2/forum-service/internal/handler"
 	"github.com/Frozz164/forum-app_v2/forum-service/internal/migrations"
@@ -16,6 +11,8 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"log"
+	"time"
 )
 
 func main() {
@@ -41,7 +38,7 @@ func main() {
 	postService := service.NewPostService(postRepo)
 	chatService := service.NewChatService(chatRepo)
 
-	pool := websocket.NewPool()
+	pool := websocket.NewPool(chatService)
 	go pool.Start()
 
 	postHandler := handler.NewPostHandler(postService)
@@ -52,7 +49,7 @@ func main() {
 
 	// CORS configuration
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowOrigins:     []string{"http://localhost:8081"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -60,14 +57,14 @@ func main() {
 		AllowWebSockets:  true,
 		MaxAge:           12 * time.Hour,
 	}))
-
+	router.Static("/static", "../web")          // CSS/JS/Images
+	router.StaticFile("/", "../web/index.html") // Главная страница
+	authGroup := router.Group("/api")
 	// Public routes
 	router.GET("/api/posts", postHandler.GetAllPosts)
 	router.GET("/api/posts/:id", postHandler.GetPost)
-	router.GET("/ws", chatHandler.WebsocketHandler)
+	router.GET("/ws", middleware.AuthWebSocketMiddleware(cfg.JWT.SecretKey), chatHandler.WebsocketHandler)
 
-	// Authenticated routes
-	authGroup := router.Group("/api")
 	authGroup.Use(middleware.AuthMiddleware(cfg.JWT.SecretKey))
 	{
 		authGroup.POST("/posts", postHandler.CreatePost)

@@ -1,9 +1,11 @@
 package domain
 
+import _ "time"
+
 type Message struct {
 	ID        int64  `json:"id"`
-	Content   string `json:"content" validate:"required,min=1,max=500"`
+	Content   string `json:"content"`
 	Username  string `json:"username"`
-	CreatedAt string `json:"created_at"`
 	UserID    int64  `json:"user_id,omitempty"`
+	CreatedAt string `json:"created_at"` // или time.Time в зависимости от реализации
 }
