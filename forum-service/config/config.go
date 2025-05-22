@@ -28,7 +28,6 @@ type JWTConfig struct {
 }
 
 func Load() *Config {
-	// Загрузка .env файла
 	err := godotenv.Load()
 	if err != nil {
 		log.Printf("Warning: Could not load .env file: %v", err)
