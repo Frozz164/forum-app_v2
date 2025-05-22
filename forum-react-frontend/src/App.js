@@ -1,37 +1,47 @@
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/Auth/Login';
 import Register from './components/Auth/Register';
 import Posts from './components/Posts';
 import Chat from './components/Chat';
+import Navbar from './components/Navbar';
+import './styles/chat.css';
 
 function App() {
-    const [token, setToken] = useState(localStorage.getItem('token'));
-    const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')));
+    const [token, setToken] = useState(() => {
+        const storedToken = localStorage.getItem('token');
+        return storedToken || null;
+    });
+
+    const [user, setUser] = useState(() => {
+        const userData = localStorage.getItem('user');
+        return userData ? JSON.parse(userData) : null;
+    });
+
+    const logout = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setToken(null);
+        setUser(null);
+        window.location.href = '/login';
+    };
 
     return (
         <BrowserRouter>
-            <div className="app-container" style={{ display: 'flex', minHeight: '100vh' }}>
+            <Navbar token={token} onLogout={logout} />
+            <div className="app-content">
                 <Routes>
                     <Route path="/login" element={
-                        token ? <Navigate to="/" /> :
-                            <Login setToken={setToken} setUser={setUser} />
+                        token ? <Navigate to="/" /> : <Login setToken={setToken} setUser={setUser} />
                     } />
-                    <Route path="/register" element={<Register />} />
+                    <Route path="/register" element={
+                        token ? <Navigate to="/" /> : <Register setToken={setToken} setUser={setUser} />
+                    } />
                     <Route path="/" element={
-                        token ? (
-                            <div style={{ display: 'flex', flex: 1 }}>
-                                <div style={{ width: '70%', padding: '20px' }}>
-                                    <Posts token={token} user={user} />
-                                </div>
-                                <div style={{ width: '30%', padding: '20px', borderLeft: '1px solid #ddd' }}>
-                                    <Chat token={token} user={user} />
-                                </div>
-                            </div>
-                        ) : (
-                            <Navigate to="/login" />
-                        )
+                        <div className="main-content">
+                            <Posts token={token} user={user} />
+                            <Chat token={token} user={user} />
+                        </div>
                     } />
                 </Routes>
             </div>

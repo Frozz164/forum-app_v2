@@ -4,33 +4,41 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
-
 	"github.com/Frozz164/forum-app_v2/auth-service/internal/domain"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
-// AuthRepositoryImpl ...
 type AuthRepositoryImpl struct {
-	db *sql.DB
+	db     *sql.DB
+	logger zerolog.Logger
 }
 
 func (r *AuthRepositoryImpl) LoginByEmail(ctx context.Context, email, password string) (string, error) {
-	//TODO implement me
+	r.logger.Info().Str("email", email).Msg("LoginByEmail called")
+	// Реализация остается прежней
 	panic("implement me")
 }
 
 func (r *AuthRepositoryImpl) GetByEmail(ctx context.Context, email string) (interface{}, interface{}) {
-	//TODO implement me
+	r.logger.Info().Str("email", email).Msg("GetByEmail called")
+	// Реализация остается прежней
 	panic("implement me")
 }
 
-// NewAuthRepositoryImpl ...
 func NewAuthRepositoryImpl(db *sql.DB) *AuthRepositoryImpl {
-	return &AuthRepositoryImpl{db: db}
+	return &AuthRepositoryImpl{
+		db:     db,
+		logger: log.With().Str("component", "auth_repository").Logger(),
+	}
 }
 
-// Create ...
 func (r *AuthRepositoryImpl) Create(ctx context.Context, user *domain.User) (int64, error) {
+	r.logger.Info().
+		Str("username", user.Username).
+		Str("email", user.Email).
+		Msg("Create user called")
+
 	query := `
 		INSERT INTO users (username, password, email)
 		VALUES ($1, $2, $3)
@@ -40,16 +48,17 @@ func (r *AuthRepositoryImpl) Create(ctx context.Context, user *domain.User) (int
 	var id int64
 	err := r.db.QueryRowContext(ctx, query, user.Username, user.Password, user.Email).Scan(&id)
 	if err != nil {
-		log.Printf("Error creating user in database: %v", err)
+		r.logger.Error().Err(err).Msg("Error creating user in database")
 		return 0, fmt.Errorf("failed to create user: %w", err)
 	}
 
-	log.Printf("User created with ID: %d", id)
+	r.logger.Info().Int64("user_id", id).Msg("User created in database")
 	return id, nil
 }
 
-// GetByUsername ...
 func (r *AuthRepositoryImpl) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
+	r.logger.Info().Str("username", username).Msg("GetByUsername called")
+
 	query := `
 		SELECT id, username, password, email
 		FROM users
@@ -60,17 +69,20 @@ func (r *AuthRepositoryImpl) GetByUsername(ctx context.Context, username string)
 	err := r.db.QueryRowContext(ctx, query, username).Scan(&user.ID, &user.Username, &user.Password, &user.Email)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // User not found
+			r.logger.Info().Msg("User not found by username")
+			return nil, nil
 		}
-		log.Printf("Error getting user by username: %v", err)
+		r.logger.Error().Err(err).Msg("Error getting user by username")
 		return nil, fmt.Errorf("failed to get user by username: %w", err)
 	}
 
+	r.logger.Info().Int64("user_id", user.ID).Msg("User found by username")
 	return user, nil
 }
 
-// GetByID ...
 func (r *AuthRepositoryImpl) GetByID(ctx context.Context, id int64) (*domain.User, error) {
+	r.logger.Info().Int64("user_id", id).Msg("GetByID called")
+
 	query := `
 		SELECT id, username, password, email
 		FROM users
@@ -81,11 +93,13 @@ func (r *AuthRepositoryImpl) GetByID(ctx context.Context, id int64) (*domain.Use
 	err := r.db.QueryRowContext(ctx, query, id).Scan(&user.ID, &user.Username, &user.Password, &user.Email)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // User not found
+			r.logger.Info().Msg("User not found by ID")
+			return nil, nil
 		}
-		log.Printf("Error getting user by ID: %v", err)
+		r.logger.Error().Err(err).Msg("Error getting user by ID")
 		return nil, fmt.Errorf("failed to get user by ID: %w", err)
 	}
 
+	r.logger.Info().Int64("user_id", user.ID).Msg("User found by ID")
 	return user, nil
 }

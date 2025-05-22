@@ -1,63 +1,93 @@
 import { useState, useEffect } from 'react';
-import { getPosts, createPost } from '../services/api';
+import { forumAPI } from '../services/api';
 
 export default function Posts({ token, user }) {
     const [posts, setPosts] = useState([]);
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
+    const [error, setError] = useState('');
 
     useEffect(() => {
-        const fetchPosts = async () => {
-            try {
-                const response = await getPosts();
-                setPosts(response.data);
-            } catch (err) {
-                console.error('Failed to fetch posts', err);
-            }
-        };
         fetchPosts();
     }, []);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    const fetchPosts = async () => {
         try {
-            await createPost({ title, content }, token);
-            const response = await getPosts();
-            setPosts(response.data);
+            const response = await forumAPI.getPosts();
+            setPosts(response.data || []);
+        } catch (err) {
+            console.error('Error fetching posts:', err);
+            setError(err.message);
+        }
+    };
+
+    const createPost = async () => {
+        if (!title.trim() || !content.trim()) {
+            setError('Title and content are required');
+            return;
+        }
+
+        try {
+            await forumAPI.createPost({ title, content });
             setTitle('');
             setContent('');
+            setError('');
+            await fetchPosts();
         } catch (err) {
-            console.error('Failed to create post', err);
+            console.error('Error creating post:', err);
+            setError(err.message);
+        }
+    };
+
+    const deletePost = async (postId) => {
+        try {
+            await forumAPI.deletePost(postId);
+            await fetchPosts();
+        } catch (err) {
+            console.error('Error deleting post:', err);
+            setError(err.message);
         }
     };
 
     return (
-        <div>
-            <h2>Posts</h2>
+        <div className="posts-container">
             {token && (
-                <form onSubmit={handleSubmit}>
+                <div className="post-form">
+                    <h3>Create New Post</h3>
+                    {error && <div className="error-message">{error}</div>}
                     <input
-                        type="text"
-                        placeholder="Title"
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
+                        placeholder="Post title"
                         required
                     />
                     <textarea
-                        placeholder="Content"
                         value={content}
                         onChange={(e) => setContent(e.target.value)}
+                        placeholder="Post content"
                         required
                     />
-                    <button type="submit">Create Post</button>
-                </form>
+                    <button onClick={createPost}>Create Post</button>
+                </div>
             )}
-            <div>
+
+            <div className="posts-list">
+                <h3>Recent Posts</h3>
                 {posts.map(post => (
-                    <div key={post.id} style={{ margin: '20px 0', padding: '10px', border: '1px solid #eee' }}>
-                        <h3>{post.title}</h3>
+                    <div key={post.id} className="post">
+                        <h4>{post.title}</h4>
                         <p>{post.content}</p>
-                        <small>By: {post.author || 'Unknown'}</small>
+                        <div className="post-footer">
+                            <span>By: {post.author || 'Unknown'}</span>
+                            {post.author_id === user?.id && (
+                                <button
+                                    className="delete-btn"
+                                    onClick={() => deletePost(post.id)}
+                                >
+                                    Delete
+                                </button>
+                            )}
+                        </div>
                     </div>
                 ))}
             </div>

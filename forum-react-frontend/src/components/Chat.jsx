@@ -1,62 +1,104 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function Chat({ token, user }) {
     const [messages, setMessages] = useState([]);
-    const [message, setMessage] = useState('');
-    const [ws, setWs] = useState(null);
+    const [inputMessage, setInputMessage] = useState('');
+    const wsRef = useRef(null);
 
     useEffect(() => {
-        if (!token) return;
-
-        const socket = new WebSocket(`ws://localhost:8081/ws?token=${token}`);
+        const socket = new WebSocket(`ws://localhost:8081/ws`);
+        wsRef.current = socket;
 
         socket.onopen = () => {
-            console.log('WebSocket connected');
-            setWs(socket);
+            if (token) {
+                socket.send(JSON.stringify({
+                    type: 'auth',
+                    token: token
+                }));
+            }
+            socket.send(JSON.stringify({
+                type: 'get_history',
+                limit: 100
+            }));
         };
 
-        socket.onmessage = (e) => {
-            const newMessage = JSON.parse(e.data);
-            setMessages(prev => [...prev, newMessage]);
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (Array.isArray(data)) {
+                    setMessages(data);
+                } else {
+                    setMessages(prev => [...prev, data]);
+                }
+            } catch (err) {
+                console.error('Error parsing message:', err);
+            }
+        };
+
+        socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
         };
 
         return () => {
-            socket.close();
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.close();
+            }
         };
     }, [token]);
 
     const sendMessage = () => {
-        if (ws && message.trim()) {
-            ws.send(JSON.stringify({
-                Content: message,
-                Type: 1,
-                Sender: user.username,
-                UserID: user.id
-            }));
-            setMessage('');
+        if (!inputMessage.trim() || !token) return;
+
+        const message = {
+            type: 1,
+            content: inputMessage,
+            sender: user.username,
+            userId: user.id,
+            timestamp: Date.now()
+        };
+
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify(message));
+            setInputMessage('');
+        } else {
+            console.error('WebSocket is not connected');
         }
     };
 
     return (
-        <div>
-            <h2>Chat</h2>
-            <div style={{ height: '300px', overflowY: 'scroll', border: '1px solid #ddd', padding: '10px' }}>
-                {messages.map((msg, i) => (
-                    <div key={i} style={{ marginBottom: '10px' }}>
-                        <strong>{msg.Sender}:</strong> {msg.Content}
+        <div className="chat-container">
+            <div className="chat-header">
+                <h2>Community Chat</h2>
+            </div>
+
+            <div className="messages-container">
+                {messages.map((msg) => (
+                    <div key={msg.id || msg.timestamp} className={`message ${msg.userId === user?.id ? 'own-message' : ''}`}>
+                        <div className="message-header">
+                            <span className="message-sender">{msg.sender || 'Anonymous'}</span>
+                            <span className="message-time">
+                                {new Date(msg.timestamp).toLocaleString()}
+                            </span>
+                        </div>
+                        <div className="message-content">{msg.content}</div>
                     </div>
                 ))}
             </div>
-            {token && (
-                <div style={{ display: 'flex', marginTop: '10px' }}>
+
+            {token ? (
+                <div className="message-input-container">
                     <input
                         type="text"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
+                        value={inputMessage}
+                        onChange={(e) => setInputMessage(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                        style={{ flex: 1 }}
+                        placeholder="Type your message..."
                     />
                     <button onClick={sendMessage}>Send</button>
+                </div>
+            ) : (
+                <div className="login-notice">
+                    Please login to send messages
                 </div>
             )}
         </div>

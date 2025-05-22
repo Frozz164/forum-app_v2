@@ -6,5 +6,5 @@ type Post struct {
 	Content   string `json:"content" validate:"required,min=10"`
 	AuthorID  int64  `json:"author_id"`
 	CreatedAt string `json:"created_at"`
-	Author    string `json:"author,omitempty"` // Добавлено для фронтенда
+	Author    string `json:"author"` // Добавлено для фронтенда
 }

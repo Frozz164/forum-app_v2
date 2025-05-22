@@ -1,5 +1,3 @@
-// migrations.go в папке /internal
-
 package migrations
 
 import (
@@ -7,7 +5,6 @@ import (
 	"fmt"
 )
 
-// MigrateDB migrates the database
 func MigrateDB(db *sql.DB) error {
 	query := `
 		CREATE TABLE IF NOT EXISTS users (

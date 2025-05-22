@@ -1,8 +1,7 @@
 package handler
 
 import (
-	_ "context"
-	"log"
+	"github.com/rs/zerolog"
 	"net/http"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/Frozz164/forum-app_v2/forum-service/internal/service"
 	"github.com/Frozz164/forum-app_v2/forum-service/pkg/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/time/rate"
 )
 
@@ -18,6 +18,7 @@ type ChatHandler struct {
 	pool        *websocket.Pool
 	jwtSecret   string
 	rateLimiter *rate.Limiter
+	logger      zerolog.Logger
 }
 
 func NewChatHandler(chatService service.ChatService, pool *websocket.Pool, jwtSecret string) *ChatHandler {
@@ -25,19 +26,26 @@ func NewChatHandler(chatService service.ChatService, pool *websocket.Pool, jwtSe
 		chatService: chatService,
 		pool:        pool,
 		jwtSecret:   jwtSecret,
-		rateLimiter: rate.NewLimiter(rate.Every(time.Second), 1), // 1 запрос в секунду
+		rateLimiter: rate.NewLimiter(rate.Every(time.Second), 1),
+		logger:      log.With().Str("component", "chat_handler").Logger(),
 	}
 }
 
 func (h *ChatHandler) WebsocketHandler(c *gin.Context) {
+	logger := h.logger.With().
+		Str("method", "WebsocketHandler").
+		Str("remote_addr", c.Request.RemoteAddr).
+		Logger()
+
 	if !h.rateLimiter.Allow() {
+		logger.Warn().Msg("Rate limit exceeded")
 		c.AbortWithStatus(http.StatusTooManyRequests)
 		return
 	}
 
 	conn, err := websocket.Upgrade(c.Writer, c.Request)
 	if err != nil {
-		log.Printf("WebSocket upgrade failed: %v", err)
+		logger.Error().Err(err).Msg("WebSocket upgrade failed")
 		return
 	}
 
@@ -47,7 +55,10 @@ func (h *ChatHandler) WebsocketHandler(c *gin.Context) {
 	var readOnly = true
 
 	if token != "" {
-		if claims, err := helper.ValidateTokenWithClaims(token, h.jwtSecret); err == nil {
+		claims, err := helper.ValidateTokenWithClaims(token, h.jwtSecret)
+		if err != nil {
+			logger.Warn().Err(err).Str("token_prefix", token[:min(10, len(token))]).Msg("Token validation failed")
+		} else {
 			readOnly = false
 			username = claims.Username
 			userID = claims.UserID
@@ -56,18 +67,20 @@ func (h *ChatHandler) WebsocketHandler(c *gin.Context) {
 
 	if readOnly {
 		username = "Guest_" + generateRandomID()
+		logger.Debug().
+			Str("username", username).
+			Msg("Assigning guest username")
 	}
 
-	client := &websocket.Client{
-		Conn:     conn,
-		Pool:     h.pool,
-		Username: username,
-		UserID:   userID,
-		ReadOnly: readOnly,
-		Send:     make(chan websocket.Message, 256),
-	}
+	client := websocket.NewClient(conn, h.pool, username, userID, readOnly)
 
 	h.pool.Register <- client
+
+	logger.Info().
+		Str("username", username).
+		Int64("user_id", userID).
+		Bool("read_only", readOnly).
+		Msg("New WebSocket client registered")
 
 	go client.Read(h.chatService)
 	go client.Write()

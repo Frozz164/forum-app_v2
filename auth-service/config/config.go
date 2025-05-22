@@ -37,7 +37,6 @@ func Load() *Config {
 		log.Printf("Warning: Could not load .env file: %v", err)
 	}
 
-	// Проверка обязательных переменных
 	required := []string{"JWT_SECRET", "DB_PASSWORD"}
 	for _, key := range required {
 		if os.Getenv(key) == "" {
@@ -45,7 +44,7 @@ func Load() *Config {
 		}
 	}
 
-	expiresIn, _ := strconv.Atoi(getEnv("JWT_EXPIRES_IN", "3600"))
+	expiresIn, _ := strconv.Atoi(getEnv("JWT_EXPIRES_IN", "36000"))
 
 	return &Config{
 		Port: getEnv("PORT", "8080"),
