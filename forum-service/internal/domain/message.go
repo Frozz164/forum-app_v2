@@ -7,5 +7,5 @@ type Message struct {
 	Content   string `json:"content"`
 	Username  string `json:"username"`
 	UserID    int64  `json:"user_id,omitempty"`
-	CreatedAt string `json:"created_at"` // или time.Time в зависимости от реализации
+	CreatedAt string `json:"created_at"` 
 }
